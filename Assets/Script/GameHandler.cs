@@ -1,18 +1,23 @@
-using System;
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using DG.Tweening;
+using Script;
 
 public class GameHandler : MonoBehaviour
 {
-    [SerializeField] private GameController gameController;
-
-    [SerializeField] public int boardWidth = 10;
-
-    [SerializeField] public int boardHeight = 10;
-
-    [SerializeField] public BoardView boardView;
+    [SerializeField] private int boardWidth = 10;
+    [SerializeField] private int boardHeight = 10;
+    [SerializeField] private int MaxMoves = 30;
+    [SerializeField] private BoardView boardView;
+    [SerializeField] private HudView hudView;
+    [SerializeField] private EndGamePopupController endGamePopupController;
+    
+    private GameController gameController;
+    private int selectedX, selectedY = -1;
+    private bool isAnimating;
+    private int movesLeft;
+    private int totalScore;
+    
+    private bool isSecondClick => selectedX > -1 && selectedY > -1;
 
     private void Awake()
     {
@@ -22,72 +27,54 @@ public class GameHandler : MonoBehaviour
 
     private void Start()
     {
-        List<List<Tile>> board = gameController.StartGame(boardWidth, boardHeight);
-        boardView.CreateBoard(board);
+        movesLeft = MaxMoves;
+        hudView.UpdateHud(0, movesLeft);
+        boardView.CreateBoard(gameController.StartGame(boardWidth, boardHeight));
     }
-
-    private int selectedX, selectedY = -1;
-
-    private bool isAnimating;
 
     private void OnTileClick(int x, int y)
     {
         if (isAnimating) return;
 
-        if (selectedX > -1 && selectedY > -1)
-        {
-            if (Mathf.Abs(selectedX - x) + Mathf.Abs(selectedY - y) > 1)
-            {
-                selectedX = -1;
-                selectedY = -1;
-            }
-            else
-            {
-                isAnimating = true;
-                boardView.SwapTiles(selectedX, selectedY, x, y).onComplete += () =>
-                {
-                    bool isValid = gameController.IsValidMovement(selectedX, selectedY, x, y);
-                    if (!isValid)
-                    {
-                        boardView.SwapTiles(x, y, selectedX, selectedY)
-                        .onComplete += () => isAnimating = false;
-                    }
-                    else
-                    {
-                        List<BoardSequence> swapResult = gameController.SwapTile(selectedX, selectedY, x, y);
-
-                        AnimateBoard(swapResult, 0, () => isAnimating = false);
-                    }
-
-                    selectedX = -1;
-                    selectedY = -1;
-                };
-            }
-        }
-        else
+        if (!CanSwap(x, y))
         {
             selectedX = x;
             selectedY = y;
+            return;
+        }
+        
+        isAnimating = true;
+        bool isValid = gameController.IsValidMovement(selectedX, selectedY, x, y);
+        
+        boardView.AnimatePlayerMove(selectedX, selectedY, x, y, isValid).OnComplete(() =>
+        {
+            if (isValid)
+            {
+                MoveResult swapResult = gameController.SwapTile(selectedX, selectedY, x, y);
+                totalScore += swapResult.Score;
+                boardView.AnimateBoard(swapResult.BoardResult, 0, OnAnimationEnds);
+                hudView.UpdateHud(totalScore, --movesLeft);
+                return;
+            }
+            
+            OnAnimationEnds();
+        });
+    }
+
+    private void OnAnimationEnds()
+    {
+        isAnimating = false;
+        selectedX = -1;
+        selectedY = -1;
+
+        if (movesLeft <= 0)
+        {
+            endGamePopupController.Show(totalScore);
         }
     }
 
-    private void AnimateBoard(List<BoardSequence> boardSequences, int i, Action onComplete)
+    private bool CanSwap(int x, int y)
     {
-        Sequence sequence = DOTween.Sequence();
-
-        BoardSequence boardSequence = boardSequences[i];
-        sequence.Append(boardView.DestroyTiles(boardSequence.matchedPosition));
-        sequence.Append(boardView.MoveTiles(boardSequence.movedTiles));
-        sequence.Append(boardView.CreateTile(boardSequence.addedTiles));
-
-        i++;
-        if (i < boardSequences.Count)
-        {
-            sequence.onComplete += () => AnimateBoard(boardSequences, i, onComplete);
-        }
-        else
-        {
-            sequence.onComplete += () => onComplete();
-        }
+        return isSecondClick && Mathf.Abs(selectedX - x) + Mathf.Abs(selectedY - y) == 1;
     }
 }

@@ -7,13 +7,10 @@ using UnityEngine.UI;
 public class BoardView : MonoBehaviour
 {
     [SerializeField] private TileSpotView tileSpotPrefab;
-
     [SerializeField] private TilePrefabRepository tilePrefabRepository;
-
     [SerializeField] private GridLayoutGroup boardContainer;
 
     private TileSpotView[][] _tileSpots;
-
     private TileView[][] _tiles;
 
     public event Action<int, int> onTileClick;
@@ -40,47 +37,60 @@ public class BoardView : MonoBehaviour
                 _tileSpots[y][x] = tileSpot;
 
                 int tileTypeIndex = board[y][x].type;
-                if (tileTypeIndex > -1)
-                {
-                    TileView tilePrefab = tilePrefabRepository.tileTypePrefabList[tileTypeIndex];
-                    TileView tile = Instantiate(tilePrefab);
-                    tileSpot.SetTile(tile);
+                if (tileTypeIndex <= -1) continue;
+                
+                TileView tile = tilePrefabRepository.CreateTile(tileTypeIndex);
+                tileSpot.SetTile(tile);
 
-                    _tiles[y][x] = tile;
-                }
+                _tiles[y][x] = tile;
             }
         }
     }
-
-    public void DestroyBoard()
+    
+    public void AnimateBoard(List<BoardSequence> boardSequences, int i, Action onComplete)
     {
-        for (int y = 0; y < _tiles.Length; y++)
-        {
-            for (int x = 0; x < _tiles[y].Length; x++)
+        BoardSequence boardSequence = boardSequences[i];
+        DOTween.Sequence().Append(DestroyTiles(boardSequence.matchedPosition))
+            .Append(MoveTiles(boardSequence.movedTiles))
+            .Append(CreateTile(boardSequence.addedTiles))
+            .OnComplete(() =>
             {
-                Destroy(_tiles[y][x].gameObject);
-                Destroy(_tileSpots[y][x].gameObject);
-            }
-        }
-
-        _tileSpots = null;
-        _tiles = null;
+                i++;
+                if (i < boardSequences.Count)
+                {
+                    AnimateBoard(boardSequences, i, onComplete);
+                } 
+                else
+                {
+                    onComplete();
+                }
+            });
     }
 
-    public Tween SwapTiles(int fromX, int fromY, int toX, int toY)
+    public Tween AnimatePlayerMove(int fromX, int fromY, int toX, int toY, bool validPlay)
     {
-        Sequence swapSequence = DOTween.Sequence();
-        swapSequence.Append(_tileSpots[fromY][fromX].AnimatedSetTile(_tiles[toY][toX]));
-        swapSequence.Join(_tileSpots[toY][toX].AnimatedSetTile(_tiles[fromY][fromX]));
+        if (!validPlay)
+        {
+            return DOTween.Sequence()
+                .Append(SwapTiles(fromX, fromY, toX, toY))
+                .Append(SwapTiles(toX, toY, fromX, fromY));
+        }
 
-        TileView SwapedTile = _tiles[fromY][fromX];
-        _tiles[fromY][fromX] = _tiles[toY][toX];
-        _tiles[toY][toX] = SwapedTile;
+        return SwapTiles(fromX, fromY, toX, toY);
+    }
+
+    private Tween SwapTiles(int fromX, int fromY, int toX, int toY)
+    {
+        Sequence swapSequence = DOTween.Sequence()
+            .Append(_tileSpots[fromY][fromX].AnimatedSetTile(_tiles[toY][toX]))
+            .Join(_tileSpots[toY][toX].AnimatedSetTile(_tiles[fromY][fromX]));
+
+        (_tiles[fromY][fromX], _tiles[toY][toX]) = (_tiles[toY][toX], _tiles[fromY][fromX]);
 
         return swapSequence;
     }
 
-    public Tween DestroyTiles(List<Vector2Int> matchedPosition)
+    private Tween DestroyTiles(List<Vector2Int> matchedPosition)
     {
         for (int i = 0; i < matchedPosition.Count; i++)
         {
@@ -91,7 +101,7 @@ public class BoardView : MonoBehaviour
         return DOVirtual.DelayedCall(0.2f, () => { });
     }
 
-    public Tween MoveTiles(List<MovedTileInfo> movedTiles)
+    private Tween MoveTiles(List<MovedTileInfo> movedTiles)
     {
         TileView[][] tiles = new TileView[_tiles.Length][];
         for (int y = 0; y < _tiles.Length; y++)
@@ -120,7 +130,7 @@ public class BoardView : MonoBehaviour
         return sequence;
     }
 
-    public Tween CreateTile(List<AddedTileInfo> addedTiles)
+    private Tween CreateTile(List<AddedTileInfo> addedTiles)
     {
         Sequence seq = DOTween.Sequence();
         for (int i = 0; i < addedTiles.Count; i++)
